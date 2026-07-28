@@ -10,7 +10,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.config import get_settings
 
-security = HTTPBearer(auto_error=False)
+strict_security = HTTPBearer(auto_error=True)
+optional_security = HTTPBearer(auto_error=False)
 
 
 def create_token(email: str, is_2fa_complete: bool = False) -> str:
@@ -37,15 +38,12 @@ def decode_token(token: str) -> dict:
 
 
 def require_auth(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(strict_security),
 ) -> dict:
     """
     FastAPI dependency that requires a valid JWT with 2FA completed.
     Returns the decoded JWT payload.
     """
-    if not credentials:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     payload = decode_token(credentials.credentials)
 
     if not payload.get("2fa_complete"):
@@ -55,7 +53,7 @@ def require_auth(
 
 
 def optional_auth(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
 ) -> Optional[dict]:
     """
     FastAPI dependency that extracts auth if present, returns None for guests.
