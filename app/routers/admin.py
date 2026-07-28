@@ -24,7 +24,7 @@ from app.rag.registry import register_pdf, load_registry
 
 from app.config import get_settings
 from app.rag.chunker import chunk_markdown
-from app.rag.embedder import embed_texts, sparse_encode_texts
+from app.rag.embedder import embed_texts
 from app.rag.vector_store import collection_count, ensure_collection, upsert_chunks
 from app.rag.semantic_cache import increment_knowledge_version
 
@@ -121,13 +121,12 @@ async def _pdf_to_markdown(file_bytes: bytes, filename: str) -> str:
 
 
 def _ingest_markdown(markdown: str, source: str, id_offset: int) -> int:
-    """Chunk, embed (dense + sparse), upsert. Returns number of chunks."""
+    """Chunk, embed (dense), upsert. Returns number of chunks."""
     chunks = chunk_markdown(markdown, source=source, start_id=id_offset, max_words=400)
     if not chunks:
         return 0
     texts = [c.text for c in chunks]
     dense_embeddings = embed_texts(texts)
-    sparse_embeddings = sparse_encode_texts(texts)
 
     from app.rag.registry import get_pdf_url
     pdf_url = get_pdf_url(source)
@@ -137,12 +136,11 @@ def _ingest_markdown(markdown: str, source: str, id_offset: int) -> int:
             "id": c.id,
             "text": c.text,
             "embedding": dense_emb,
-            "sparse_embedding": sparse_emb,
             "source": c.source,
             "page_number": c.page_number,
             "pdf_url": pdf_url,
         }
-        for c, dense_emb, sparse_emb in zip(chunks, dense_embeddings, sparse_embeddings)
+        for c, dense_emb in zip(chunks, dense_embeddings)
     ]
     upsert_chunks(records)
     return len(records)
