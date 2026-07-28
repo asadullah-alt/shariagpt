@@ -17,7 +17,7 @@ Flow:
     embed(query) + embed(hypothesis) → averaged dense vector
 """
 from typing import Optional
-from openai import OpenAI
+from openai import AsyncOpenAI
 from app.config import get_settings
 
 HYDE_PROMPT = """You are an Islamic finance expert. Given the question below, 
@@ -32,24 +32,23 @@ Question: {query}
 Passage:"""
 
 
-def generate_hypothetical_document(query: str) -> Optional[str]:
+async def generate_hypothetical_document(query: str) -> Optional[str]:
     """
     Use the LLM to generate a hypothetical passage that answers the query.
     Returns None if the LLM call fails (retrieval falls back to raw query).
+    Now async to avoid blocking the event loop during the ~2s LLM call.
     """
     s = get_settings()
     if not s.openrouter_api_key:
         return None
 
     try:
-        from app.routers.chat import llm_breaker
-        client = OpenAI(
+        client = AsyncOpenAI(
             api_key=s.openrouter_api_key, 
             base_url=s.openrouter_base_url,
             timeout=3.0  # Strict 3-second timeout for HyDE
         )
-        completion = llm_breaker.call(
-            client.chat.completions.create,
+        completion = await client.chat.completions.create(
             model=s.openrouter_model,
             messages=[
                 {"role": "user", "content": HYDE_PROMPT.format(query=query)},
@@ -65,45 +64,3 @@ def generate_hypothetical_document(query: str) -> Optional[str]:
     except Exception as e:
         print(f"[HyDE] LLM call failed, falling back to raw query: {e}")
         return None
-
-
-def transform_query(query: str) -> dict:
-    """
-    Transform a raw user query for improved retrieval.
-
-    Returns
-    -------
-    dict with keys:
-    dict with keys:
-        - "dense_vector": list of dense embeddings to average for search
-        - "hyde_passage":  the generated hypothetical passage (or None)
-    """
-    from app.rag.embedder import embed_text, sparse_encode_text
-
-    # Always compute the raw query vectors
-    raw_dense = embed_text(query)
-    raw_sparse = sparse_encode_text(query)
-
-    # Generate HyDE passage
-    hyde_passage = generate_hypothetical_document(query)
-
-    if hyde_passage:
-        hyde_dense = embed_text(hyde_passage)
-        # Average the raw query and HyDE embeddings for a blended dense vector
-        blended_dense = [
-            (r + h) / 2.0 for r, h in zip(raw_dense, hyde_dense)
-        ]
-        # For sparse vectors, encode the combination to capture both intent and hypothesis keywords
-        blended_sparse = sparse_encode_text(query + " " + hyde_passage)
-        return {
-            "dense_vector": blended_dense,
-            "sparse_vector": blended_sparse,
-            "hyde_passage": hyde_passage,
-        }
-
-    # Fallback: no HyDE, just raw query
-    return {
-        "dense_vector": raw_dense,
-        "sparse_vector": raw_sparse,
-        "hyde_passage": None,
-    }

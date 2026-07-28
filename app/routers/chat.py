@@ -164,7 +164,7 @@ async def chat_endpoint(
                 answer = cached_data
             cache_hit = True
         else:
-            chunks = retrieve(clean_message, k=s.top_k_chunks)
+            chunks = await retrieve(clean_message, k=s.top_k_chunks)
             t_retrieve = time.monotonic()
             
             chunk_ids = [c["chunk_id"] for c in chunks]
