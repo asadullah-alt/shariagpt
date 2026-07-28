@@ -198,8 +198,30 @@
     </div>
 
     <div class="auth-section">
-        <input type="password" id="apiKey" class="input-field" placeholder="Enter X-Admin-Key to manage documents" onchange="fetchPDFs(); fetchEvals();">
-        <button class="btn" onclick="fetchPDFs(); fetchEvals();">Authenticate & Load</button>
+        <input type="password" id="apiKey" class="input-field" placeholder="Enter X-Admin-Key to manage documents" onchange="fetchPDFs(); fetchEvals(); fetchFeedback();">
+        <button class="btn" onclick="fetchPDFs(); fetchEvals(); fetchFeedback();">Authenticate & Load</button>
+    </div>
+
+    <!-- New User Feedback Section -->
+    <div class="upload-section" style="padding: 2rem; margin-bottom: 2rem; border-color: rgba(255, 166, 88, 0.4);">
+        <h3 style="margin-top: 0; color: #fff;">Human-in-the-Loop Feedback</h3>
+        <p style="color: #8b949e; font-size: 0.9rem; margin-bottom: 1.5rem;">User feedback requiring review.</p>
+        
+        <table id="feedbackTable" style="margin-bottom: 1.5rem;">
+            <thead>
+                <tr>
+                    <th style="width: 80px; text-align:center;">Score</th>
+                    <th>User ID</th>
+                    <th>Comment</th>
+                    <th style="width: 150px;">Run ID (LangSmith)</th>
+                </tr>
+            </thead>
+            <tbody id="feedbackTableBody">
+                <tr>
+                    <td colspan="4" style="text-align: center; color: #8b949e;">Authenticate to load feedback...</td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 
     <!-- New Evaluations Section -->
@@ -336,6 +358,40 @@
             }
         } catch (e) {
             console.error('Failed to load evals:', e);
+        }
+    }
+
+    async function fetchFeedback() {
+        const key = document.getElementById('apiKey').value;
+        if (!key) return;
+        
+        try {
+            const res = await fetch(`${API_URL}/admin/feedback`, {
+                headers: { 'X-Admin-Key': key }
+            });
+            const data = await res.json();
+            const tbody = document.getElementById('feedbackTableBody');
+            
+            if (data.status === 'success' && data.data && data.data.length > 0) {
+                tbody.innerHTML = data.data.map(f => {
+                    const icon = f.score === 1 ? '👍' : '👎';
+                    const runIdShort = f.run_id ? f.run_id.substring(0, 8) + '...' : 'N/A';
+                    const langsmithLink = f.run_id ? `<a href="https://smith.langchain.com/" target="_blank" style="color: var(--admin-accent); text-decoration:none;" title="${f.run_id}">${runIdShort}</a>` : 'N/A';
+                    return `
+                        <tr>
+                            <td style="font-size: 1.5rem; text-align:center;">${icon}</td>
+                            <td style="color: #c9d1d9;">${f.user_id || 'guest'}</td>
+                            <td style="color: #fff;">${f.comment || '<i>No comment provided</i>'}</td>
+                            <td>${langsmithLink}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #8b949e;">No feedback recorded yet.</td></tr>';
+            }
+        } catch (e) {
+            console.error('Failed to load feedback:', e);
+            document.getElementById('feedbackTableBody').innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--admin-danger);">Failed to load feedback</td></tr>';
         }
     }
 

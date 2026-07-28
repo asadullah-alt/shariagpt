@@ -1,16 +1,19 @@
 import time
 import logging
 import uuid
-import pybreaker
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from openai import OpenAI
+from openai import AsyncOpenAI
 from typing import Optional
 
 from app.config import get_settings
 from app.pii.redactor import redact, restore
+from app.pii.stream_reverter import stream_restore
 from app.rag.retriever import retrieve
 from app.rag.prompt_builder import build_messages
 from app.rag.semantic_cache import get_cached_response, set_cached_response
@@ -21,13 +24,11 @@ from app.auth.jwt_handler import require_auth
 from app.auth.user_store import find_user_by_email
 from app.security.guardrails import check_prompt_injection
 from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-# Circuit breaker for LLM calls: opens after 5 consecutive failures, resets after 60s
-llm_breaker = pybreaker.CircuitBreaker(fail_max=5, reset_timeout=60)
 
 
 class ChatRequest(BaseModel):
@@ -36,30 +37,47 @@ class ChatRequest(BaseModel):
     customer_context: Optional[dict] = None
 
 
-class Citation(BaseModel):
-    source: str
-    page_number: int
-    pdf_url: Optional[str] = None
+class FeedbackRequest(BaseModel):
+    run_id: str
+    score: int
+    comment: Optional[str] = None
 
 
-class ChatResponse(BaseModel):
-    session_id: str
-    request_id: str
-    response: str
-    retrieved_chunk_ids: list[str]
-    relevance_scores: list[float]
-    avg_relevance_score: float
-    pii_detected: list[str]
-    cache_hit: bool = False
-    citations: list[Citation] = []
+@router.post("/chat/feedback")
+async def chat_feedback(req: FeedbackRequest, token_payload: dict = Depends(require_auth)):
+    try:
+        from langsmith import Client
+        ls_client = Client()
+        ls_client.create_feedback(
+            run_id=req.run_id,
+            key="user_score",
+            score=req.score,
+            comment=req.comment
+        )
+        
+        # Save locally for admin
+        feedback_file = Path("data/feedback.jsonl")
+        with open(feedback_file, "a") as f:
+            f.write(json.dumps({
+                "run_id": req.run_id,
+                "score": req.score,
+                "comment": req.comment,
+                "user_id": token_payload.get("sub"),
+                "timestamp": time.time()
+            }) + "\n")
+            
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Feedback error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to submit feedback")
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat")
 @traceable(run_type="chain", name="chat_pipeline")
 async def chat_endpoint(
     req: ChatRequest,
     token_payload: dict = Depends(require_auth)
-) -> ChatResponse:
+):
     s = get_settings()
     request_id = str(uuid.uuid4())
     t0 = time.monotonic()
@@ -74,9 +92,6 @@ async def chat_endpoint(
     pii_types = list(redaction.detected_types)
     pii_mapping = redaction.mapping.copy()
     
-    t_pii = time.monotonic()
-    logger.info(f"[Chat] PII redaction completed in {round((t_pii - t0) * 1000, 2)}ms")
-
     clean_context: Optional[str] = None
     if req.customer_context:
         ctx_str = str(req.customer_context)
@@ -87,11 +102,9 @@ async def chat_endpoint(
 
     user_id = token_payload.get("sub")
     account_type = "guest"
-    
     user = find_user_by_email(user_id)
     if user:
         account_type = user.get("account_type", "guest")
-        # Override request context with authoritative DB context
         clean_context = (
             f"Name: {user['name']}\n"
             f"Emirates ID: {user['emirates_id']}\n"
@@ -99,7 +112,6 @@ async def chat_endpoint(
             f"Account Type: {user['account_type']}\n"
             f"Balance: {user['balance']}"
         )
-        # Redact the DB context before sending to LLM
         ctx_red = redact(clean_context)
         clean_context = ctx_red.redacted_text
         pii_types += ctx_red.detected_types
@@ -110,23 +122,30 @@ async def chat_endpoint(
     intent = intent_result.get("intent", "SHARIA_FINANCE")
     action = intent_result.get("action")
 
-    t_intent = time.monotonic()
-    logger.info(f"[Chat] Intent routing completed in {round((t_intent - t_pii) * 1000, 2)}ms: {intent}")
+    # We will generate a stream of Server-Sent Events (SSE)
+    async def event_generator():
+        run_tree = get_current_run_tree()
+        run_id = str(run_tree.id) if run_tree else None
+        
+        chunk_ids = []
+        scores = []
+        avg_score = 0.0
+        citations = []
+        cache_hit = False
+        final_answer = ""
+        
+        aclient = AsyncOpenAI(
+            api_key=s.openrouter_api_key, 
+            base_url=s.openrouter_base_url,
+            timeout=30.0 
+        )
 
-    chunks = []
-    chunk_ids = []
-    scores = []
-    avg_score = 0.0
-    citations = []
-    usage = None
-    cache_hit = False
-
-    if intent == "OUT_OF_SCOPE":
-        answer = "I am not equipped to answer that."
-    elif intent == "ACCOUNT_INFO" and user:
-        # ── Bank API Flow ───────────────────────────────────────────────────
-        try:
-            import json
+        if intent == "OUT_OF_SCOPE":
+            final_answer = "I am not equipped to answer that."
+            yield f"data: {json.dumps({'content': final_answer})}\n\n"
+        
+        elif intent == "ACCOUNT_INFO" and user:
+            # ── Bank API Flow ───────────────────────────────────────────────────
             from app.services import bank_api
             api_result = {}
             if action == "CHECK_BALANCE":
@@ -136,146 +155,135 @@ async def chat_endpoint(
             elif action == "ACCOUNT_STATUS":
                 api_result = bank_api.get_account_status(user['account_number'])
             
-            client = OpenAI(
-                api_key=s.openrouter_api_key, 
-                base_url=s.openrouter_base_url,
-                timeout=10.0 
-            )
             prompt = f"User asked: {clean_message}\nBank API returned: {json.dumps(api_result)}\nAnswer the user based on the API result. Keep it brief. If the API returned empty, say you could not find the info."
-            completion = llm_breaker.call(
-                client.chat.completions.create,
-                model=s.openrouter_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
-                temperature=0.0
-            )
-            answer = completion.choices[0].message.content or ""
-            usage = completion.usage
-        except pybreaker.CircuitBreakerError:
-            answer = "I am unable to retrieve your account information at this time because the banking service is unavailable."
-        except Exception as e:
-            answer = f"I am unable to retrieve your account information at this time. ({str(e)})"
             
-    else:
-        # ── SHARIA_FINANCE Flow (RAG + Cache) ───────────────────────────────
-        cached_data = get_cached_response(clean_message, user_id=user_id, account_type=account_type)
-        
-        t_cache = time.monotonic()
-        logger.info(f"[Chat] Semantic cache check completed in {round((t_cache - t_intent) * 1000, 2)}ms")
-        
-        if cached_data:
-            if isinstance(cached_data, dict):
-                answer = cached_data.get("response", "")
-                citations = cached_data.get("citations", [])
-            else:
-                answer = cached_data
-            cache_hit = True
-        else:
-            chunks = await retrieve(clean_message, k=s.top_k_chunks)
-            t_retrieve = time.monotonic()
-            
-            chunk_ids = [c["chunk_id"] for c in chunks]
-            scores = [c["score"] for c in chunks]
-            avg_score = round(sum(scores) / len(scores), 4) if scores else 0.0
-
-            from app.rag.registry import get_pdf_url
-            seen_citations = set()
-            for c in chunks:
-                cit_key = (c["source"], c.get("page_number", 1))
-                if cit_key not in seen_citations:
-                    seen_citations.add(cit_key)
-                    source_name = c["source"]
-                    pdf_url = c.get("pdf_url") or get_pdf_url(source_name)
-                    if pdf_url:
-                        citations.append({
-                            "source": source_name,
-                            "page_number": c.get("page_number", 1),
-                            "pdf_url": pdf_url
-                        })
-
-            store = get_session_store()
-            history = store.get_history(req.session_id)
-
-            messages = build_messages(
-                user_message=clean_message,
-                context_chunks=chunks,
-                conversation_history=history,
-                customer_context=clean_context,
-            )
-            
-            client = OpenAI(
-                api_key=s.openrouter_api_key, 
-                base_url=s.openrouter_base_url,
-                timeout=30.0 
-            )
             try:
-                completion = llm_breaker.call(
-                    client.chat.completions.create,
+                stream_res = await aclient.chat.completions.create(
                     model=s.openrouter_model,
-                    messages=messages,
-                    max_tokens=1024,
-                    temperature=0.1,
-                    extra_headers={"HTTP-Referer": "https://shariagpt.onrender.com", "X-Title": "ShariaGPT"},
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=200,
+                    temperature=0.0,
+                    stream=True
                 )
-                answer = completion.choices[0].message.content or ""
-                usage = completion.usage
-            except pybreaker.CircuitBreakerError:
-                raise HTTPException(status_code=503, detail="LLM service is temporarily unavailable. Please try again later.")
+                
+                async def llm_token_gen():
+                    async for chunk in stream_res:
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            yield content
+
+                async for safe_token in stream_restore(llm_token_gen(), pii_mapping):
+                    final_answer += safe_token
+                    yield f"data: {json.dumps({'content': safe_token})}\n\n"
+                    
             except Exception as e:
-                raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")
+                err_msg = "I am unable to retrieve your account information at this time."
+                final_answer = err_msg
+                yield f"data: {json.dumps({'content': err_msg})}\n\n"
+                
+        else:
+            # ── SHARIA_FINANCE Flow (RAG + Cache) ───────────────────────────────
+            cached_data = get_cached_response(clean_message, user_id=user_id, account_type=account_type)
+            
+            if cached_data:
+                if isinstance(cached_data, dict):
+                    final_answer = cached_data.get("response", "")
+                    citations = cached_data.get("citations", [])
+                else:
+                    final_answer = cached_data
+                cache_hit = True
+                
+                final_answer = restore(final_answer, pii_mapping)
+                yield f"data: {json.dumps({'content': final_answer})}\n\n"
+            else:
+                chunks = await retrieve(clean_message, k=s.top_k_chunks)
+                chunk_ids = [c["chunk_id"] for c in chunks]
+                scores = [c["score"] for c in chunks]
+                avg_score = round(sum(scores) / len(scores), 4) if scores else 0.0
 
-    t_llm = time.monotonic()
-    logger.info(f"[Chat] Generation completed in {round((t_llm - t_intent) * 1000, 2)}ms")
+                from app.rag.registry import get_pdf_url
+                seen_citations = set()
+                for c in chunks:
+                    cit_key = (c["source"], c.get("page_number", 1))
+                    if cit_key not in seen_citations:
+                        seen_citations.add(cit_key)
+                        source_name = c["source"]
+                        pdf_url = c.get("pdf_url") or get_pdf_url(source_name)
+                        if pdf_url:
+                            citations.append({
+                                "source": source_name,
+                                "page_number": c.get("page_number", 1),
+                                "pdf_url": pdf_url
+                            })
 
-    # ── 6. Persist turn & Cache ──────────────────────────────────────────────
-    store = get_session_store()
-    store.append_turn(req.session_id, clean_message, answer, user_id)
-    if not cache_hit and intent == "SHARIA_FINANCE":
-        set_cached_response(
-            query=clean_message, 
-            response=answer, 
-            user_id=user_id, 
-            account_type=account_type, 
-            citations=citations
-        )
+                store = get_session_store()
+                history = store.get_history(req.session_id)
 
-    # ── 7. Anonymization Reverter ────────────────────────────────────────────
-    final_answer = restore(answer, pii_mapping)
+                messages = build_messages(
+                    user_message=clean_message,
+                    context_chunks=chunks,
+                    conversation_history=history,
+                    customer_context=clean_context,
+                )
+                
+                try:
+                    stream_res = await aclient.chat.completions.create(
+                        model=s.openrouter_model,
+                        messages=messages,
+                        max_tokens=1024,
+                        temperature=0.1,
+                        stream=True,
+                        extra_headers={"HTTP-Referer": "https://shariagpt.onrender.com", "X-Title": "ShariaGPT"},
+                    )
+                    
+                    async def rag_token_gen():
+                        async for chunk in stream_res:
+                            content = chunk.choices[0].delta.content
+                            if content:
+                                yield content
 
-    # ── 8. Emit trace ────────────────────────────────────────────────────────
-    latency_ms = round((time.monotonic() - t0) * 1000, 2)
-    emit_trace(
-        TraceRecord(
-            request_id=request_id,
-            session_id=req.session_id,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            latency_ms=latency_ms,
-            model="cache" if cache_hit else s.openrouter_model,
-            prompt_tokens=usage.prompt_tokens if usage else 0,
-            completion_tokens=usage.completion_tokens if usage else 0,
-            total_tokens=usage.total_tokens if usage else 0,
-            chunk_ids=chunk_ids,
-            relevance_scores=scores,
-            avg_relevance_score=avg_score,
-            pii_detected=list(set(pii_types)),
-            query_length=len(req.message),
-            response_length=len(final_answer),
-            cache_hit=cache_hit,
-        ),
-        log_dir=s.log_dir,
-    )
+                    async for safe_token in stream_restore(rag_token_gen(), pii_mapping):
+                        final_answer += safe_token
+                        yield f"data: {json.dumps({'content': safe_token})}\n\n"
+                        
+                except Exception as e:
+                    err_msg = "LLM service is temporarily unavailable. Please try again later."
+                    final_answer = err_msg
+                    yield f"data: {json.dumps({'content': err_msg})}\n\n"
 
-    return ChatResponse(
-        session_id=req.session_id,
-        request_id=request_id,
-        response=final_answer,
-        retrieved_chunk_ids=chunk_ids,
-        relevance_scores=scores,
-        avg_relevance_score=avg_score,
-        pii_detected=list(set(pii_types)),
-        cache_hit=cache_hit,
-        citations=citations,
-    )
+        # ── Persist turn & Cache ──────────────────────────────────────────────
+        store = get_session_store()
+        store.append_turn(req.session_id, clean_message, final_answer, user_id)
+        
+        if not cache_hit and intent == "SHARIA_FINANCE" and final_answer:
+            # We must cache the *unrestored* PII answer for consistency, so we map it back.
+            # But the user has seen the restored one. Actually semantic cache caches the restored one?
+            # Previously, the restored answer was returned, but we cached the non-restored answer.
+            # Let's re-mask it to cache securely.
+            masked_answer = final_answer
+            for placeholder, original in pii_mapping.items():
+                masked_answer = masked_answer.replace(original, placeholder)
+                
+            set_cached_response(
+                query=clean_message, 
+                response=masked_answer, 
+                user_id=user_id, 
+                account_type=account_type, 
+                citations=citations
+            )
+
+        # Emit final metadata event
+        meta = {
+            "done": True,
+            "citations": citations,
+            "run_id": run_id,
+            "pii_detected": list(set(pii_types)),
+            "cache_hit": cache_hit
+        }
+        yield f"data: {json.dumps(meta)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 
 @router.get("/chat/sessions")
 async def get_user_chats(token_payload: dict = Depends(require_auth)):
@@ -284,13 +292,11 @@ async def get_user_chats(token_payload: dict = Depends(require_auth)):
     chats = store.get_user_chats(user_id)
     return {"chats": chats}
 
+
 @router.get("/chat/sessions/{session_id}")
 async def get_chat_history(session_id: str, token_payload: dict = Depends(require_auth)):
     user_id = token_payload.get("sub")
     store = get_session_store()
-    
-    # We must ensure the session belongs to the user
-    # A simple check: get user's chats and see if session_id is in them
     chats = store.get_user_chats(user_id)
     if not any(c.get("session_id") == session_id for c in chats):
         raise HTTPException(status_code=404, detail="Chat not found or access denied")

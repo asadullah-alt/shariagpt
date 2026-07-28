@@ -311,27 +311,102 @@ chatForm.addEventListener('submit', async (e) => {
             body: JSON.stringify(payload)
         });
 
-        const data = await res.json();
-        
-        // Remove typing indicator
+        // Remove typing indicator and add empty assistant message bubble
         typingMsg.remove();
+        const msgDiv = addMessage("", false); 
+        const bubble = msgDiv.querySelector('.bubble div:first-child');
         
-        // Check if PII was redacted
-        if (data.pii_detected && data.pii_detected.length > 0) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        
+        let runId = null;
+        let piiDetected = [];
+        let isCacheHit = false;
+        let citations = [];
+        
+        // For handling partial SSE chunks that get cut off mid-stream
+        let buffer = "";
+
+        while (true) {
+            const { done: readerDone, value } = await reader.read();
+            if (readerDone) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            
+            const events = buffer.split('\n\n');
+            // Keep the last chunk in the buffer if it's incomplete
+            buffer = events.pop();
+            
+            for (const ev of events) {
+                if (ev.startsWith('data: ')) {
+                    const dataStr = ev.substring(6);
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (data.done) {
+                            runId = data.run_id;
+                            piiDetected = data.pii_detected || [];
+                            isCacheHit = data.cache_hit;
+                            citations = data.citations || [];
+                        } else if (data.content) {
+                            // Append raw text safely
+                            bubble.textContent += data.content;
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+                    } catch(e) {
+                        console.warn("Failed to parse SSE JSON", e, dataStr);
+                    }
+                }
+            }
+        }
+
+        // Post processing (PII badges, citations, feedback buttons)
+        if (piiDetected.length > 0) {
             const piiBadge = document.createElement('div');
             piiBadge.className = 'pii-badge';
-            piiBadge.innerHTML = `🛡️ PII Masked: ${data.pii_detected.join(', ')}`;
+            piiBadge.innerHTML = `🛡️ PII Masked: ${piiDetected.join(', ')}`;
             userMsgDiv.querySelector('.bubble').appendChild(piiBadge);
         }
 
-        addMessage(data.response, false, data.cache_hit, data.citations || []);
+        if (citations.length > 0) {
+            let citationHtml = '<div class="citation-container">' + citations.map(c => {
+                const url = c.pdf_url || '';
+                const dispName = c.source.replace(/_/g, ' ');
+                return `<span class="source-tag" data-url="${url}" data-source="${c.source}" data-page="${c.page_number}">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                    ${dispName} (Page ${c.page_number})
+                </span>`;
+            }).join('') + '</div>';
+            
+            const citationWrapper = document.createElement('div');
+            citationWrapper.innerHTML = citationHtml;
+            msgDiv.querySelector('.bubble').appendChild(citationWrapper.firstChild);
+            
+            msgDiv.querySelectorAll('.source-tag').forEach(tag => {
+                tag.addEventListener('click', () => {
+                    openPdfViewer(tag.getAttribute('data-url'), tag.getAttribute('data-source'), tag.getAttribute('data-page'));
+                });
+            });
+        }
+        
+        if (isCacheHit) {
+            badge.classList.remove('hidden');
+            setTimeout(() => badge.classList.add('hidden'), 3000);
+        }
+        
+        // Add Feedback Buttons if we have a run_id
+        if (runId) {
+            addFeedbackButtons(msgDiv, runId);
+        }
 
-        // Refresh sidebar to capture the new chat title if this was a new thread
         fetchUserChats();
 
     } catch (err) {
         typingMsg.remove();
         addMessage("Sorry, I encountered an error connecting to the server.", false);
+        console.error(err);
     }
 });
 
@@ -587,3 +662,44 @@ document.getElementById('btn-new-chat').addEventListener('click', () => {
         if (i > 0) m.remove();
     });
 });
+
+// --- Feedback Logic ---
+function addFeedbackButtons(msgDiv, runId) {
+    const feedbackDiv = document.createElement('div');
+    feedbackDiv.className = 'feedback-container';
+    feedbackDiv.style.marginTop = '0.5rem';
+    feedbackDiv.style.display = 'flex';
+    feedbackDiv.style.gap = '0.5rem';
+    feedbackDiv.innerHTML = `
+        <span class="feedback-btn up" style="cursor:pointer; opacity:0.7; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7" title="Helpful" onclick="submitFeedback('${runId}', 1, this)">👍</span>
+        <span class="feedback-btn down" style="cursor:pointer; opacity:0.7; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7" title="Not helpful" onclick="submitFeedback('${runId}', 0, this)">👎</span>
+    `;
+    msgDiv.querySelector('.bubble').appendChild(feedbackDiv);
+}
+
+window.submitFeedback = async function(runId, score, btn) {
+    const container = btn.parentElement;
+    container.innerHTML = '<span style="font-size:0.8rem; color:#8b949e;">Thanks for your feedback!</span>';
+    
+    let comment = null;
+    if (score === 0) {
+        comment = prompt("Please tell us what went wrong so we can improve:") || "";
+    }
+    
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+        
+        await fetch('/chat/feedback', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                run_id: runId,
+                score: score,
+                comment: comment
+            })
+        });
+    } catch (e) {
+        console.error("Failed to submit feedback", e);
+    }
+};

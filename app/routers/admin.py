@@ -277,3 +277,21 @@ async def get_evals() -> dict:
     with open(eval_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return {"status": "success", "data": data}
+
+@router.get("/feedback", dependencies=[Depends(require_admin)])
+async def get_feedback() -> dict:
+    """Get user feedback for admin review."""
+    import json
+    feedback_path = Path("data/feedback.jsonl")
+    if not feedback_path.exists():
+        return {"status": "success", "data": []}
+    
+    results = []
+    with open(feedback_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                results.append(json.loads(line))
+                
+    # Sort newest first
+    results.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    return {"status": "success", "data": results}

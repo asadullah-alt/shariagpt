@@ -16,7 +16,7 @@
 8. [HyDE Query Enrichment](#8-hyde-query-enrichment)
 9. [Semantic Caching](#9-semantic-caching)
 10. [Admin Panel & Document Management](#10-admin-panel--document-management)
-11. [Observability & Audit Logging](#11-observability--audit-logging)
+11. [Observability, Tracing & Evaluation](#11-observability-tracing--evaluation)
 12. [Production Trade-offs & Constraints](#12-production-trade-offs--constraints)
 13. [Scalability Analysis](#13-scalability-analysis)
 14. [Test Coverage](#14-test-coverage)
@@ -321,7 +321,7 @@ When an admin deletes a document via `DELETE /admin/pdfs/{source_name}`:
 
 ---
 
-## 11. Observability & Audit Logging
+## 11. Observability, Tracing & Evaluation
 
 ### Structured Trace Logging
 
@@ -351,6 +351,21 @@ The `SecurityHeadersMiddleware` enforces:
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
 - `Content-Security-Policy` (whitelisting `self`, Cloudinary, and Google Fonts)
+
+### LangSmith Production Tracing
+
+To provide granular visibility into the LLM execution waterfall, the core pipeline (`chat_endpoint`, `retrieve`, `generate_hypothetical_document`) is instrumented with LangSmith `@traceable` decorators. This allows us to inspect exact prompt inputs, completions, and step-by-step latencies directly in the LangSmith UI.
+
+### Automated Evaluation (Ragas)
+
+To prevent silent RAG degradation, the system uses **Ragas** (Retrieval Augmented Generation Assessment) for automated evaluation:
+
+- **Golden Dataset**: A curated set of complex Islamic finance questions (`data/eval_dataset.json`) paired with ground-truth answers.
+- **Evaluation Pipeline**: The `scripts/evaluate_rag.py` script runs queries through the live pipeline and grades them on:
+  - **Faithfulness** (Hallucination detection)
+  - **Answer Relevancy**
+  - **Context Precision & Recall**
+- **Admin Integration**: Results are saved locally and surfaced in the Admin Panel (`GET /admin/evals`), providing a single pane of glass for system health alongside LangSmith quick-links.
 
 ---
 
@@ -405,6 +420,15 @@ This section evaluates each component of the system for horizontal scalability â
 | **Intent Router** | Makes a synchronous LLM call per request (~300ms). | Cache common intent classifications. Most queries fall into predictable patterns â€” caching the intent for semantically similar queries would eliminate redundant LLM calls. |
 | **Single-Process Deployment** | Render free tier runs a single `uvicorn` process. | Scale to multiple workers via `gunicorn` with `uvicorn.workers.UvicornWorker`. All state is already external (Qdrant, Redis), so adding workers requires zero code changes. |
 | **Bank API (Mock)** | Currently returns hardcoded data. | Replace with real `httpx.AsyncClient` calls to core banking APIs. The circuit breaker (`pybreaker`) is already in place and will protect against cascading failures. |
+
+### 100x Volume Stress Test: What Breaks First?
+
+At 100x request volume, the current architecture will experience cascading failures across multiple layers due to its single-instance, CPU-bound design constraints:
+
+1. **FastEmbed CPU Exhaustion**: Sparse embeddings via `fastembed` run locally on the CPU. At 100x concurrency, matrix multiplications will peg the CPU to 100%, causing the event loop to choke and Render to kill the process. *Fix: Offload to an external API (Cohere) or a dedicated GPU-backed TEI microservice.*
+2. **Uvicorn Concurrency Ceiling**: The single `uvicorn` process cannot utilize multiple CPU cores, resulting in HTTP 502 Bad Gateway timeouts as new connections queue and drop. *Fix: Wrap the app in `gunicorn` with `UvicornWorker` (`workers=4`) and scale horizontally across multiple container nodes.*
+3. **OpenRouter Rate Limits**: Hitting provider TPM/RPM limits will trigger the `pybreaker` circuit breaker, resulting in 60-second windows of total system downtime for all users. *Fix: Implement an LLM proxy router (like LiteLLM) for automatic cross-provider failover (e.g., Azure OpenAI fallback) or purchase Provisioned Throughput.*
+4. **Qdrant Free Tier Limits**: The dual read-load (HyDE + raw query) will exceed free-tier IOPS and connection limits. *Fix: Upgrade to a dedicated Qdrant cluster with robust client-side connection pooling.*
 
 ### Scaling Roadmap (Priority Order)
 
