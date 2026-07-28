@@ -15,7 +15,6 @@ Flow:
     [Raw Query] → LLM → [Hypothetical Passage]
                   ↓
     embed(query) + embed(hypothesis) → averaged dense vector
-    sparse(query)                    → sparse vector (unchanged)
 """
 from typing import Optional
 from openai import OpenAI
@@ -75,15 +74,14 @@ def transform_query(query: str) -> dict:
     Returns
     -------
     dict with keys:
-        - "dense_vectors": list of dense embeddings to average for search
-        - "sparse_vector": sparse vector from the original query
+    dict with keys:
+        - "dense_vector": list of dense embeddings to average for search
         - "hyde_passage":  the generated hypothetical passage (or None)
     """
-    from app.rag.embedder import embed_text, sparse_encode_text
+    from app.rag.embedder import embed_text
 
     # Always compute the raw query vectors
     raw_dense = embed_text(query)
-    sparse_vec = sparse_encode_text(query)
 
     # Generate HyDE passage
     hyde_passage = generate_hypothetical_document(query)
@@ -96,13 +94,11 @@ def transform_query(query: str) -> dict:
         ]
         return {
             "dense_vector": blended_dense,
-            "sparse_vector": sparse_vec,
             "hyde_passage": hyde_passage,
         }
 
     # Fallback: no HyDE, just raw query
     return {
         "dense_vector": raw_dense,
-        "sparse_vector": sparse_vec,
         "hyde_passage": None,
     }
