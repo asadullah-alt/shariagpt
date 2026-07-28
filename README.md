@@ -73,8 +73,8 @@ python data/ingest.py
 
 ### 4. Run locally
 ```bash
-uvicorn app.main:app --reload
-# API docs: http://localhost:8000/docs
+python app/main.py
+# API docs: http://localhost:10000/docs
 ```
 
 ### 5. Run tests
