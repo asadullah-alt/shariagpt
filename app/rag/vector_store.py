@@ -101,17 +101,16 @@ def hybrid_search(query_dense: list[float], query_sparse: dict, k: int = 5) -> l
         collection_name=s.qdrant_collection,
         prefetch=[
             Prefetch(
-                query=NamedVector(name="dense", vector=query_dense),
+                query=query_dense,
+                using="dense",
                 limit=k * 2,
             ),
             Prefetch(
-                query=NamedSparseVector(
-                    name="sparse",
-                    vector=SparseVector(
-                        indices=query_sparse["indices"],
-                        values=query_sparse["values"]
-                    )
+                query=SparseVector(
+                    indices=query_sparse["indices"],
+                    values=query_sparse["values"]
                 ),
+                using="sparse",
                 limit=k * 2,
             ),
         ],
