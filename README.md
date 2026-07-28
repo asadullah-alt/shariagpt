@@ -93,7 +93,7 @@ pytest tests/ -v
    - `QDRANT_API_KEY`
    - `REDIS_URL`
 5. Deploy — the build step pre-downloads the embedding model.
-
+##uvicorn app.main:app --reload
 ## Architecture & Technical Reasoning
 
 We have documented our comprehensive architectural decisions, trade-offs, security implementations (PII redaction), and scalability strategy in our dedicated architecture document. 

@@ -46,11 +46,15 @@ def client():
         mock_qdrant.search.return_value = []
         MockQdrant.return_value = mock_qdrant
 
-        # Patch embedder so no model download is needed
-        with patch("app.rag.embedder.SentenceTransformer") as MockST:
-            mock_st = MagicMock()
-            mock_st.encode.return_value = [0.1] * 384
-            MockST.return_value = mock_st
+        # Patch embedder so no external API call is made
+        with patch("app.rag.embedder.requests.post") as mock_post:
+            def side_effect(*args, **kwargs):
+                inp = kwargs.get("json", {}).get("input", "")
+                n = 1 if isinstance(inp, str) else len(inp)
+                mock_resp = MagicMock()
+                mock_resp.json.return_value = {"data": [{"embedding": [0.1]*384, "index": i} for i in range(n)]}
+                return mock_resp
+            mock_post.side_effect = side_effect
 
             from app.main import app
             yield TestClient(app, raise_server_exceptions=True)

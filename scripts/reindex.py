@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import get_settings
 from app.rag.chunker import chunk_markdown
-from app.rag.embedder import embed_texts, sparse_encode_texts
+from app.rag.embedder import embed_texts
 from app.rag.vector_store import get_client, ensure_collection, upsert_chunks
 from app.rag.registry import get_pdf_url
 
@@ -36,7 +36,7 @@ def main():
         print(f"[Reindex] Warning during drop: {e}")
 
     # ── Step 2: Recreate with hybrid config ──────────────────────────────────
-    print("[Reindex] Creating collection with hybrid (dense + sparse) vectors...")
+    print("[Reindex] Creating collection with dense vectors...")
     ensure_collection()
 
     # ── Step 3: Find all Markdown docs ───────────────────────────────────────
@@ -65,9 +65,6 @@ def main():
         print(f"    Computing dense embeddings for {len(texts)} chunks...")
         dense_embeddings = embed_texts(texts)
 
-        print(f"    Computing SPLADE sparse embeddings...")
-        sparse_embeddings = sparse_encode_texts(texts)
-
         pdf_url = get_pdf_url(source)
 
         records = [
@@ -75,12 +72,11 @@ def main():
                 "id": c.id,
                 "text": c.text,
                 "embedding": dense_emb,
-                "sparse_embedding": sparse_emb,
                 "source": c.source,
                 "page_number": c.page_number,
                 "pdf_url": pdf_url,
             }
-            for c, dense_emb, sparse_emb in zip(chunks, dense_embeddings, sparse_embeddings)
+            for c, dense_emb in zip(chunks, dense_embeddings)
         ]
 
         upsert_chunks(records)
