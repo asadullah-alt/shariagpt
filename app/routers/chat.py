@@ -16,7 +16,7 @@ from app.rag.prompt_builder import build_messages
 from app.rag.semantic_cache import get_cached_response, set_cached_response
 from app.observability.tracer import TraceRecord, emit_trace
 from app.sessions.store import get_session_store
-from app.auth.jwt_handler import optional_auth
+from app.auth.jwt_handler import require_auth
 from app.auth.user_store import find_user_by_email
 
 router = APIRouter()
@@ -54,7 +54,7 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
     req: ChatRequest,
-    token_payload: Optional[dict] = Depends(optional_auth)
+    token_payload: dict = Depends(require_auth)
 ) -> ChatResponse:
     s = get_settings()
     request_id = str(uuid.uuid4())
@@ -75,26 +75,24 @@ async def chat_endpoint(
         clean_context = ctx_red.redacted_text
         pii_types += ctx_red.detected_types
 
-    user_id = "guest"
+    user_id = token_payload.get("sub")
     account_type = "guest"
     
-    if token_payload:
-        user_id = token_payload.get("sub")
-        user = find_user_by_email(user_id)
-        if user:
-            account_type = user.get("account_type", "guest")
-            # Override request context with authoritative DB context
-            clean_context = (
-                f"Name: {user['name']}\n"
-                f"Emirates ID: {user['emirates_id']}\n"
-                f"Account Number: {user['account_number']}\n"
-                f"Account Type: {user['account_type']}\n"
-                f"Balance: {user['balance']}"
-            )
-            # Redact the DB context before sending to LLM
-            ctx_red = redact(clean_context)
-            clean_context = ctx_red.redacted_text
-            pii_types += ctx_red.detected_types
+    user = find_user_by_email(user_id)
+    if user:
+        account_type = user.get("account_type", "guest")
+        # Override request context with authoritative DB context
+        clean_context = (
+            f"Name: {user['name']}\n"
+            f"Emirates ID: {user['emirates_id']}\n"
+            f"Account Number: {user['account_number']}\n"
+            f"Account Type: {user['account_type']}\n"
+            f"Balance: {user['balance']}"
+        )
+        # Redact the DB context before sending to LLM
+        ctx_red = redact(clean_context)
+        clean_context = ctx_red.redacted_text
+        pii_types += ctx_red.detected_types
 
     # ── 2. Check Semantic Cache ─────────────────────────────────────────────
     cached_data = get_cached_response(clean_message, user_id=user_id, account_type=account_type)
@@ -264,18 +262,14 @@ async def chat_endpoint(
     )
 
 @router.get("/chat/sessions")
-async def get_user_chats(token_payload: dict = Depends(optional_auth)):
-    if not token_payload:
-        raise HTTPException(status_code=401, detail="Authentication required")
+async def get_user_chats(token_payload: dict = Depends(require_auth)):
     user_id = token_payload.get("sub")
     store = get_session_store()
     chats = store.get_user_chats(user_id)
     return {"chats": chats}
 
 @router.get("/chat/sessions/{session_id}")
-async def get_chat_history(session_id: str, token_payload: dict = Depends(optional_auth)):
-    if not token_payload:
-        raise HTTPException(status_code=401, detail="Authentication required")
+async def get_chat_history(session_id: str, token_payload: dict = Depends(require_auth)):
     user_id = token_payload.get("sub")
     store = get_session_store()
     

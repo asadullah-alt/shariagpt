@@ -57,7 +57,10 @@ def client():
             mock_post.side_effect = side_effect
 
             from app.main import app
+            from app.auth.jwt_handler import require_auth
+            app.dependency_overrides[require_auth] = lambda: {"sub": "testuser@example.com", "2fa_complete": True}
             yield TestClient(app, raise_server_exceptions=True)
+            app.dependency_overrides.clear()
 
 
 @pytest.fixture
