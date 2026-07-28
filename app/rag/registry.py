@@ -35,3 +35,12 @@ def get_pdf_url(source_name: str) -> Optional[str]:
     if item:
         return item.get("cloudinary_url")
     return None
+
+def unregister_pdf(source_name: str) -> bool:
+    """Remove a PDF from the registry."""
+    registry = load_registry()
+    if source_name in registry:
+        del registry[source_name]
+        save_registry(registry)
+        return True
+    return False

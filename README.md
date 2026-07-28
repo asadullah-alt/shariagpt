@@ -10,6 +10,14 @@ and account context. Built with FastAPI, Qdrant Cloud, and OpenRouter (GPT-4o-mi
 - **Structured observability**: JSONL trace logs with latency, token usage, chunk IDs, relevance scores
 - **Automated eval tests**: Grounding, PII redaction, off-topic refusal
 
+## Enterprise Compliance & Security (Middle East Finance Ready)
+
+ShariaGPT includes built-in compliance frameworks tailored for regional financial institutions (e.g. UAE NESA, Saudi SAMA, PDPL):
+- **Audit Logging**: Comprehensive HTTP request tracking (IP, User ID, endpoints, latency) stored securely in `logs/audit.jsonl`.
+- **Data Privacy & GDPR/PDPL Rights**: Includes `/auth/export` for data portability and `DELETE /auth/account` for the Right to be Forgotten (completely wiping vectors, sessions, and DB records).
+- **Strict Security Headers**: Middleware-enforced HSTS, No-Sniff, X-Frame-Options, and CSP headers to protect web endpoints.
+- **PII Scrubbing**: Automatic pre-LLM regex detection and masking of Emirates ID, IBAN, local phone numbers, etc.
+
 ## API Endpoints
 
 ### `POST /chat`

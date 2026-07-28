@@ -42,3 +42,27 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     data = r.json()["data"]
     # Ensure they are in the same order
     return [item["embedding"] for item in sorted(data, key=lambda x: x["index"])]
+
+
+# ── Sparse Model (BM25) ──────────────────────────────────────────────────────
+_sparse_model = None
+
+def get_sparse_model():
+    global _sparse_model
+    if _sparse_model is None:
+        from fastembed import SparseTextEmbedding
+        print("[Embedder] Initializing lightweight Qdrant/bm25 sparse model...")
+        _sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+    return _sparse_model
+
+def sparse_encode_text(text: str) -> dict:
+    model = get_sparse_model()
+    result = list(model.embed([text]))[0]
+    return {"indices": result.indices.tolist(), "values": result.values.tolist()}
+
+def sparse_encode_texts(texts: list[str]) -> list[dict]:
+    if not texts:
+        return []
+    model = get_sparse_model()
+    results = model.embed(texts)
+    return [{"indices": r.indices.tolist(), "values": r.values.tolist()} for r in results]

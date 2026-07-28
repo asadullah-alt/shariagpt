@@ -236,6 +236,51 @@ function logout() {
 
 document.getElementById('btn-logout').addEventListener('click', logout);
 
+document.getElementById('btn-export-data').addEventListener('click', async () => {
+    if (!authToken) return;
+    try {
+        const res = await fetch('/auth/export', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!res.ok) throw new Error("Failed to export data");
+        const data = await res.json();
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `shariagpt_export_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert("Failed to export data: " + e.message);
+    }
+});
+
+document.getElementById('btn-delete-account').addEventListener('click', async () => {
+    if (!authToken) return;
+    if (!confirm("Are you ABSOLUTELY sure you want to delete your account?\n\nThis action cannot be undone and will permanently erase all your chats and profile data.")) {
+        return;
+    }
+    
+    try {
+        const res = await fetch('/auth/account', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Failed to delete account");
+        }
+        alert("Your account has been permanently deleted.");
+        logout();
+    } catch (e) {
+        alert("Failed to delete account: " + e.message);
+    }
+});
+
 // --- Chat API Call ---
 chatForm.addEventListener('submit', async (e) => {
     e.preventDefault();

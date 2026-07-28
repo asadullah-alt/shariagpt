@@ -133,3 +133,21 @@ def update_user_field(email: str, field: str, value) -> bool:
     except Exception as e:
         print(f"[UserStore] Update error: {e}")
         return False
+
+
+def delete_user(email: str) -> bool:
+    """Delete a user from Qdrant by email."""
+    _ensure_users_collection()
+    client = get_client()
+    user = find_user_by_email(email)
+    if not user:
+        return False
+    try:
+        client.delete(
+            collection_name=USERS_COLLECTION,
+            points_selector=[user["_point_id"]],
+        )
+        return True
+    except Exception as e:
+        print(f"[UserStore] Delete error: {e}")
+        return False

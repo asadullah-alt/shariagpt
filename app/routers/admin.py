@@ -20,12 +20,12 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile,
 from pydantic import BaseModel
 import cloudinary
 import cloudinary.uploader
-from app.rag.registry import register_pdf, load_registry
+from app.rag.registry import register_pdf, load_registry, unregister_pdf
 
 from app.config import get_settings
 from app.rag.chunker import chunk_markdown
 from app.rag.embedder import embed_texts
-from app.rag.vector_store import collection_count, ensure_collection, upsert_chunks
+from app.rag.vector_store import collection_count, ensure_collection, upsert_chunks, delete_chunks_by_source
 from app.rag.semantic_cache import increment_knowledge_version
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -233,3 +233,34 @@ async def list_docs() -> dict:
 async def list_pdfs() -> dict:
     """List all registered PDFs and their Cloudinary URLs."""
     return {"pdfs": load_registry()}
+
+
+@router.delete("/pdfs/{source_name}", dependencies=[Depends(require_admin)])
+async def delete_pdf(source_name: str) -> dict:
+    """Delete a PDF from Cloudinary, Qdrant, and local cache."""
+    registry = load_registry()
+    if source_name not in registry:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    try:
+        # 1. Delete from Cloudinary
+        if settings.cloudinary_url:
+            cloudinary.uploader.destroy(f"shariagpt/{source_name}", resource_type="raw")
+            
+        # 2. Delete chunks from Qdrant
+        delete_chunks_by_source(source_name)
+        
+        # 3. Delete local markdown file
+        md_path = DOCS_DIR / f"{source_name}.md"
+        if md_path.exists():
+            md_path.unlink()
+            
+        # 4. Remove from registry
+        unregister_pdf(source_name)
+        
+        # 5. Invalidate cache
+        increment_knowledge_version()
+        
+        return {"message": f"Successfully deleted {source_name}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Deletion failed: {e}")

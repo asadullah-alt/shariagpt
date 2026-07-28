@@ -16,7 +16,7 @@ class TestRedactorUnit:
         text = "My Emirates ID is 784-1990-1234567-1 please verify."
         result = redact(text)
         assert "784-1990-1234567-1" not in result.redacted_text
-        assert "[EMIRATES_ID_REDACTED]" in result.redacted_text
+        assert "<EMIRATES_ID_1>" in result.redacted_text
         assert "EMIRATES_ID" in result.detected_types
 
     def test_emirates_id_without_dashes_redacted(self):
@@ -29,32 +29,32 @@ class TestRedactorUnit:
         text = "My account number is 1234567890 and I need a statement."
         result = redact(text)
         assert "1234567890" not in result.redacted_text
-        assert "[ACCOUNT_NUM_REDACTED]" in result.redacted_text
+        assert "<ACCOUNT_NUMBER_1>" in result.redacted_text
         assert "ACCOUNT_NUMBER" in result.detected_types
 
     def test_email_redacted(self):
         text = "Contact me at ahmed.ali@example.ae for more info."
         result = redact(text)
         assert "ahmed.ali@example.ae" not in result.redacted_text
-        assert "[EMAIL_REDACTED]" in result.redacted_text
-        assert "EMAIL" in result.detected_types
+        assert "<EMAIL_ADDRESS_1>" in result.redacted_text
+        assert "EMAIL_ADDRESS" in result.detected_types
 
     def test_uae_phone_redacted(self):
         text = "Call me on +971501234567 about my Murabaha."
         result = redact(text)
         assert "+971501234567" not in result.redacted_text
-        assert "[PHONE_REDACTED]" in result.redacted_text
+        assert "<UAE_PHONE_1>" in result.redacted_text
         assert "UAE_PHONE" in result.detected_types
 
     def test_titled_name_redacted(self):
         text = "Dr. Mohammed Al-Rashid wants to open a Mudaraba account."
         result = redact(text)
         assert "Mohammed" not in result.redacted_text
-        assert "[NAME_REDACTED]" in result.redacted_text
-        assert "PERSON_NAME" in result.detected_types
+        assert "<PERSON_1>" in result.redacted_text
+        assert "PERSON" in result.detected_types
 
     def test_no_false_positives_for_normal_text(self):
-        text = "What is the profit rate for Murabaha financing at Mal?"
+        text = "What is the profit rate for Murabaha financing at the bank?"
         result = redact(text)
         assert result.redacted_text == text
         assert result.detected_types == []

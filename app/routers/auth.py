@@ -4,8 +4,9 @@ Auth Router — /auth/register, /auth/login, /auth/verify-2fa, /auth/me
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
-from app.auth.user_store import create_user, find_user_by_email, verify_password
+from app.auth.user_store import create_user, find_user_by_email, verify_password, delete_user
 from app.auth.jwt_handler import create_token, require_auth
+from app.sessions.store import get_session_store
 from app.auth.totp_handler import generate_totp_secret, get_provisioning_uri, generate_qr_base64, verify_totp
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -147,3 +148,42 @@ async def get_me(token_payload: dict = Depends(require_auth)):
         account_type=user["account_type"],
         balance=user["balance"]
     )
+
+
+@router.get("/export")
+async def export_data(token_payload: dict = Depends(require_auth)):
+    """Export all user data (profile and chats) for data portability compliance."""
+    email = token_payload.get("sub")
+    user = find_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    store = get_session_store()
+    chats = store.get_user_chats(email)
+    
+    # Exclude sensitive internal data
+    user.pop("password_hash", None)
+    user.pop("totp_secret", None)
+    user.pop("_point_id", None)
+    
+    return {
+        "profile": user,
+        "chats": chats
+    }
+
+
+@router.delete("/account")
+async def delete_account(token_payload: dict = Depends(require_auth)):
+    """Permanently delete user account and all associated data (Right to be Forgotten)."""
+    email = token_payload.get("sub")
+    
+    # 1. Delete all chat sessions from Redis
+    store = get_session_store()
+    store.delete_user_data(email)
+    
+    # 2. Delete user profile from Qdrant
+    success = delete_user(email)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete user profile")
+        
+    return {"message": "Account and all associated data have been permanently deleted"}

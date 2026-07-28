@@ -110,6 +110,32 @@ class SessionStore:
                 title = user_msg[:40] + "..." if len(user_msg) > 40 else user_msg
                 _user_chats[user_id][session_id] = {"title": title, "timestamp": time.time()}
 
+    def delete_user_data(self, user_id: str) -> bool:
+        if self._r:
+            try:
+                chats = self._r.hgetall(self._user_chats_key(user_id))
+                if isinstance(chats, dict):
+                    session_ids = list(chats.keys())
+                elif isinstance(chats, list):
+                    session_ids = [chats[i] for i in range(0, len(chats), 2)]
+                else:
+                    session_ids = []
+                
+                for sid in session_ids:
+                    self._r.delete(self._key(sid))
+                self._r.delete(self._user_chats_key(user_id))
+                return True
+            except Exception as e:
+                print(f"[SessionStore] Failed to delete user data: {e}")
+                return False
+        else:
+            if user_id in _user_chats:
+                session_ids = list(_user_chats[user_id].keys())
+                for sid in session_ids:
+                    _memory.pop(sid, None)
+                _user_chats.pop(user_id, None)
+            return True
+
     def clear(self, session_id: str) -> None:
         if self._r:
             try:

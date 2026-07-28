@@ -64,7 +64,11 @@
                         <div id="auth-controls" class="hidden auth-user-info">
                             <p id="auth-user-name" class="auth-user-name"></p>
                             <p id="auth-user-type" class="auth-user-type"></p>
-                            <button id="btn-logout" class="btn-secondary btn-sm">Logout</button>
+                            <div class="auth-actions-vertical" style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+                                <button id="btn-export-data" class="btn-secondary btn-sm" style="width:100%;">Export Data</button>
+                                <button id="btn-delete-account" class="btn-sm" style="width:100%; background:transparent; border:1px solid #ef4444; color:#ef4444; cursor:pointer; border-radius:6px; padding:6px 12px; transition:all 0.2s;">Delete Account</button>
+                                <button id="btn-logout" class="btn-secondary btn-sm" style="width:100%;">Logout</button>
+                            </div>
                         </div>
                     </div>
 

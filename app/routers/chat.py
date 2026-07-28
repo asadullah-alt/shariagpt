@@ -10,10 +10,11 @@ from openai import OpenAI
 from typing import Optional
 
 from app.config import get_settings
-from app.pii.redactor import redact
+from app.pii.redactor import redact, restore
 from app.rag.retriever import retrieve
 from app.rag.prompt_builder import build_messages
 from app.rag.semantic_cache import get_cached_response, set_cached_response
+from app.rag.intent_router import route_intent
 from app.observability.tracer import TraceRecord, emit_trace
 from app.sessions.store import get_session_store
 from app.auth.jwt_handler import require_auth
@@ -64,6 +65,7 @@ async def chat_endpoint(
     redaction = redact(req.message)
     clean_message = redaction.redacted_text
     pii_types = list(redaction.detected_types)
+    pii_mapping = redaction.mapping.copy()
     
     t_pii = time.monotonic()
     logger.info(f"[Chat] PII redaction completed in {round((t_pii - t0) * 1000, 2)}ms")
@@ -74,6 +76,7 @@ async def chat_endpoint(
         ctx_red = redact(ctx_str)
         clean_context = ctx_red.redacted_text
         pii_types += ctx_red.detected_types
+        pii_mapping.update(ctx_red.mapping)
 
     user_id = token_payload.get("sub")
     account_type = "guest"
@@ -93,140 +96,146 @@ async def chat_endpoint(
         ctx_red = redact(clean_context)
         clean_context = ctx_red.redacted_text
         pii_types += ctx_red.detected_types
+        pii_mapping.update(ctx_red.mapping)
 
-    # ── 2. Check Semantic Cache ─────────────────────────────────────────────
-    cached_data = get_cached_response(clean_message, user_id=user_id, account_type=account_type)
-    
-    t_cache = time.monotonic()
-    logger.info(f"[Chat] Semantic cache check completed in {round((t_cache - t_pii) * 1000, 2)}ms")
-    
-    if cached_data:
-        if isinstance(cached_data, dict):
-            cached_answer = cached_data.get("response", "")
-            cached_citations = cached_data.get("citations", [])
-        else:
-            cached_answer = cached_data
-            cached_citations = []
-            
-        # ── 2a. Cache Hit Flow ──────────────────────────────────────────────
-        latency_ms = round((time.monotonic() - t0) * 1000, 2)
-        
-        # Persist turn
-        store = get_session_store()
-        store.append_turn(req.session_id, clean_message, cached_answer, user_id)
+    # ── 1.5 Intent Routing ──────────────────────────────────────────────────
+    intent_result = route_intent(clean_message)
+    intent = intent_result.get("intent", "SHARIA_FINANCE")
+    action = intent_result.get("action")
 
-        emit_trace(
-            TraceRecord(
-                request_id=request_id,
-                session_id=req.session_id,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                latency_ms=latency_ms,
-                model="cache",
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                chunk_ids=[],
-                relevance_scores=[],
-                avg_relevance_score=0.0,
-                pii_detected=list(set(pii_types)),
-                query_length=len(req.message),
-                response_length=len(cached_answer),
-                cache_hit=True,
-            ),
-            log_dir=s.log_dir,
-        )
+    t_intent = time.monotonic()
+    logger.info(f"[Chat] Intent routing completed in {round((t_intent - t_pii) * 1000, 2)}ms: {intent}")
 
-        return ChatResponse(
-            session_id=req.session_id,
-            request_id=request_id,
-            response=cached_answer,
-            retrieved_chunk_ids=[],
-            relevance_scores=[],
-            avg_relevance_score=0.0,
-            pii_detected=list(set(pii_types)),
-            cache_hit=True,
-            citations=cached_citations,
-        )
-
-    # ── 3. Retrieve chunks (Cache Miss Flow) ────────────────────────────────
-    chunks = retrieve(clean_message, k=s.top_k_chunks)
-    
-    t_retrieve = time.monotonic()
-    logger.info(f"[Chat] Vector retrieval completed in {round((t_retrieve - t_cache) * 1000, 2)}ms")
-    
-    chunk_ids = [c["chunk_id"] for c in chunks]
-    scores = [c["score"] for c in chunks]
-    avg_score = round(sum(scores) / len(scores), 4) if scores else 0.0
-
-    # Extract unique citations
-    from app.rag.registry import get_pdf_url
-    seen_citations = set()
+    chunks = []
+    chunk_ids = []
+    scores = []
+    avg_score = 0.0
     citations = []
-    for c in chunks:
-        cit_key = (c["source"], c.get("page_number", 1))
-        if cit_key not in seen_citations:
-            seen_citations.add(cit_key)
-            source_name = c["source"]
-            pdf_url = c.get("pdf_url") or get_pdf_url(source_name)
-            if pdf_url:
-                citations.append({
-                    "source": source_name,
-                    "page_number": c.get("page_number", 1),
-                    "pdf_url": pdf_url
-                })
+    usage = None
+    cache_hit = False
 
-    # ── 3. Session history ──────────────────────────────────────────────────
-    store = get_session_store()
-    history = store.get_history(req.session_id)
+    if intent == "OUT_OF_SCOPE":
+        answer = "I am not equipped to answer that."
+    elif intent == "ACCOUNT_INFO" and user:
+        # ── Bank API Flow ───────────────────────────────────────────────────
+        try:
+            import json
+            from app.services import bank_api
+            api_result = {}
+            if action == "CHECK_BALANCE":
+                api_result = bank_api.get_account_balance(user['account_number'])
+            elif action == "RECENT_TRANSACTIONS":
+                api_result = bank_api.get_recent_transactions(user['account_number'])
+            elif action == "ACCOUNT_STATUS":
+                api_result = bank_api.get_account_status(user['account_number'])
+            
+            client = OpenAI(
+                api_key=s.openrouter_api_key, 
+                base_url=s.openrouter_base_url,
+                timeout=10.0 
+            )
+            prompt = f"User asked: {clean_message}\nBank API returned: {json.dumps(api_result)}\nAnswer the user based on the API result. Keep it brief. If the API returned empty, say you could not find the info."
+            completion = llm_breaker.call(
+                client.chat.completions.create,
+                model=s.openrouter_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                temperature=0.0
+            )
+            answer = completion.choices[0].message.content or ""
+            usage = completion.usage
+        except pybreaker.CircuitBreakerError:
+            answer = "I am unable to retrieve your account information at this time because the banking service is unavailable."
+        except Exception as e:
+            answer = f"I am unable to retrieve your account information at this time. ({str(e)})"
+            
+    else:
+        # ── SHARIA_FINANCE Flow (RAG + Cache) ───────────────────────────────
+        cached_data = get_cached_response(clean_message, user_id=user_id, account_type=account_type)
+        
+        t_cache = time.monotonic()
+        logger.info(f"[Chat] Semantic cache check completed in {round((t_cache - t_intent) * 1000, 2)}ms")
+        
+        if cached_data:
+            if isinstance(cached_data, dict):
+                answer = cached_data.get("response", "")
+                citations = cached_data.get("citations", [])
+            else:
+                answer = cached_data
+            cache_hit = True
+        else:
+            chunks = retrieve(clean_message, k=s.top_k_chunks)
+            t_retrieve = time.monotonic()
+            
+            chunk_ids = [c["chunk_id"] for c in chunks]
+            scores = [c["score"] for c in chunks]
+            avg_score = round(sum(scores) / len(scores), 4) if scores else 0.0
 
-    # ── 4. Build prompt ─────────────────────────────────────────────────────
-    messages = build_messages(
-        user_message=clean_message,
-        context_chunks=chunks,
-        conversation_history=history,
-        customer_context=clean_context,
-    )
-    
-    t_prompt = time.monotonic()
-    logger.info(f"[Chat] Prompt building completed in {round((t_prompt - t_retrieve) * 1000, 2)}ms")
+            from app.rag.registry import get_pdf_url
+            seen_citations = set()
+            for c in chunks:
+                cit_key = (c["source"], c.get("page_number", 1))
+                if cit_key not in seen_citations:
+                    seen_citations.add(cit_key)
+                    source_name = c["source"]
+                    pdf_url = c.get("pdf_url") or get_pdf_url(source_name)
+                    if pdf_url:
+                        citations.append({
+                            "source": source_name,
+                            "page_number": c.get("page_number", 1),
+                            "pdf_url": pdf_url
+                        })
 
-    # ── 5. LLM via OpenRouter ───────────────────────────────────────────────
-    client = OpenAI(
-        api_key=s.openrouter_api_key, 
-        base_url=s.openrouter_base_url,
-        timeout=30.0  # 30-second timeout to prevent Render 502s
-    )
-    try:
-        completion = llm_breaker.call(
-            client.chat.completions.create,
-            model=s.openrouter_model,
-            messages=messages,
-            max_tokens=1024,
-            temperature=0.1,
-            extra_headers={"HTTP-Referer": "https://shariagpt.onrender.com", "X-Title": "ShariaGPT"},
-        )
-    except pybreaker.CircuitBreakerError:
-        raise HTTPException(status_code=503, detail="LLM service is temporarily unavailable. Please try again later.")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")
+            store = get_session_store()
+            history = store.get_history(req.session_id)
 
-    answer = completion.choices[0].message.content or ""
-    usage = completion.usage
+            messages = build_messages(
+                user_message=clean_message,
+                context_chunks=chunks,
+                conversation_history=history,
+                customer_context=clean_context,
+            )
+            
+            client = OpenAI(
+                api_key=s.openrouter_api_key, 
+                base_url=s.openrouter_base_url,
+                timeout=30.0 
+            )
+            try:
+                completion = llm_breaker.call(
+                    client.chat.completions.create,
+                    model=s.openrouter_model,
+                    messages=messages,
+                    max_tokens=1024,
+                    temperature=0.1,
+                    extra_headers={"HTTP-Referer": "https://shariagpt.onrender.com", "X-Title": "ShariaGPT"},
+                )
+                answer = completion.choices[0].message.content or ""
+                usage = completion.usage
+            except pybreaker.CircuitBreakerError:
+                raise HTTPException(status_code=503, detail="LLM service is temporarily unavailable. Please try again later.")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")
 
     t_llm = time.monotonic()
-    logger.info(f"[Chat] LLM generation completed in {round((t_llm - t_prompt) * 1000, 2)}ms")
+    logger.info(f"[Chat] Generation completed in {round((t_llm - t_intent) * 1000, 2)}ms")
 
     # ── 6. Persist turn & Cache ──────────────────────────────────────────────
+    store = get_session_store()
     store.append_turn(req.session_id, clean_message, answer, user_id)
-    set_cached_response(
-        query=clean_message, 
-        response=answer, 
-        user_id=user_id, 
-        account_type=account_type, 
-        citations=citations
-    )
+    if not cache_hit and intent == "SHARIA_FINANCE":
+        set_cached_response(
+            query=clean_message, 
+            response=answer, 
+            user_id=user_id, 
+            account_type=account_type, 
+            citations=citations
+        )
 
-    # ── 7. Emit trace ────────────────────────────────────────────────────────
+    # ── 7. Anonymization Reverter ────────────────────────────────────────────
+    final_answer = restore(answer, pii_mapping)
+
+    # ── 8. Emit trace ────────────────────────────────────────────────────────
     latency_ms = round((time.monotonic() - t0) * 1000, 2)
     emit_trace(
         TraceRecord(
@@ -234,7 +243,7 @@ async def chat_endpoint(
             session_id=req.session_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
             latency_ms=latency_ms,
-            model=s.openrouter_model,
+            model="cache" if cache_hit else s.openrouter_model,
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
             total_tokens=usage.total_tokens if usage else 0,
@@ -243,8 +252,8 @@ async def chat_endpoint(
             avg_relevance_score=avg_score,
             pii_detected=list(set(pii_types)),
             query_length=len(req.message),
-            response_length=len(answer),
-            cache_hit=False,
+            response_length=len(final_answer),
+            cache_hit=cache_hit,
         ),
         log_dir=s.log_dir,
     )
@@ -252,12 +261,12 @@ async def chat_endpoint(
     return ChatResponse(
         session_id=req.session_id,
         request_id=request_id,
-        response=answer,
+        response=final_answer,
         retrieved_chunk_ids=chunk_ids,
         relevance_scores=scores,
         avg_relevance_score=avg_score,
         pii_detected=list(set(pii_types)),
-        cache_hit=False,
+        cache_hit=cache_hit,
         citations=citations,
     )
 

@@ -4,14 +4,25 @@ FastAPI application entry point.
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.rag.vector_store import ensure_collection, collection_count
 from app.routers import chat, health, admin, auth
+from app.observability.audit import AuditLogger, AuditMiddleware
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+        return response
 
 
 @asynccontextmanager
@@ -54,6 +65,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.add_middleware(SecurityHeadersMiddleware)
+    
+    s = get_settings()
+    audit_logger = AuditLogger(log_dir=s.log_dir)
+    app.add_middleware(AuditMiddleware, logger=audit_logger)
+
     app.include_router(chat.router)
     app.include_router(health.router)
     app.include_router(admin.router)
@@ -67,6 +84,10 @@ def create_app() -> FastAPI:
         @app.get("/")
         async def root():
             return FileResponse("frontend/index.html")
+
+        @app.get("/admin_panel")
+        async def admin_panel():
+            return FileResponse("frontend/admin.html")
 
     return app
 

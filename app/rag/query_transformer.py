@@ -78,10 +78,11 @@ def transform_query(query: str) -> dict:
         - "dense_vector": list of dense embeddings to average for search
         - "hyde_passage":  the generated hypothetical passage (or None)
     """
-    from app.rag.embedder import embed_text
+    from app.rag.embedder import embed_text, sparse_encode_text
 
     # Always compute the raw query vectors
     raw_dense = embed_text(query)
+    raw_sparse = sparse_encode_text(query)
 
     # Generate HyDE passage
     hyde_passage = generate_hypothetical_document(query)
@@ -92,13 +93,17 @@ def transform_query(query: str) -> dict:
         blended_dense = [
             (r + h) / 2.0 for r, h in zip(raw_dense, hyde_dense)
         ]
+        # For sparse vectors, encode the combination to capture both intent and hypothesis keywords
+        blended_sparse = sparse_encode_text(query + " " + hyde_passage)
         return {
             "dense_vector": blended_dense,
+            "sparse_vector": blended_sparse,
             "hyde_passage": hyde_passage,
         }
 
     # Fallback: no HyDE, just raw query
     return {
         "dense_vector": raw_dense,
+        "sparse_vector": raw_sparse,
         "hyde_passage": None,
     }

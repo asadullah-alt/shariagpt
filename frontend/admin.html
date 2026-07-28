@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShariaGPT Admin Panel</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        
+        :root {
+            --admin-bg: #0d1117;
+            --admin-card: #161b22;
+            --admin-border: #30363d;
+            --admin-text: #c9d1d9;
+            --admin-accent: #58a6ff;
+            --admin-danger: #f85149;
+            --admin-success: #238636;
+        }
+
+        body {
+            background-color: var(--admin-bg);
+            color: var(--admin-text);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        .admin-container {
+            width: 100%;
+            max-width: 1000px;
+            background: var(--admin-card);
+            border: 1px solid var(--admin-border);
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--admin-border);
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #fff;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .auth-section {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            background: rgba(88, 166, 255, 0.1);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(88, 166, 255, 0.2);
+        }
+
+        .input-field {
+            background: #0d1117;
+            border: 1px solid var(--admin-border);
+            color: #c9d1d9;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            flex-grow: 1;
+            font-family: 'Inter', sans-serif;
+            transition: border-color 0.2s;
+        }
+        
+        .input-field:focus {
+            outline: none;
+            border-color: var(--admin-accent);
+        }
+
+        .btn {
+            background: var(--admin-accent);
+            color: #fff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            background: #1f6feb;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: var(--admin-success);
+        }
+        
+        .btn-success:hover {
+            background: #2ea043;
+        }
+
+        .btn-danger {
+            background: transparent;
+            color: var(--admin-danger);
+            border: 1px solid var(--admin-border);
+            padding: 0.5rem 1rem;
+        }
+
+        .btn-danger:hover {
+            background: var(--admin-danger);
+            color: white;
+            border-color: var(--admin-danger);
+        }
+
+        .upload-section {
+            background: #0d1117;
+            border: 1px dashed var(--admin-border);
+            border-radius: 8px;
+            padding: 3rem 2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+            transition: border-color 0.2s;
+        }
+        
+        .upload-section:hover {
+            border-color: var(--admin-text);
+        }
+
+        .upload-section input[type="file"] {
+            display: none;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #0d1117;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--admin-border);
+        }
+
+        th, td {
+            text-align: left;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--admin-border);
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.02);
+            color: #8b949e;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+        
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .spinner {
+            display: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="admin-container">
+    <div class="header">
+        <h1>Admin Dashboard</h1>
+        <div style="font-size: 0.9rem; color: #8b949e;">ShariaGPT PDF Management</div>
+    </div>
+
+    <div class="auth-section">
+        <input type="password" id="apiKey" class="input-field" placeholder="Enter X-Admin-Key to manage documents" onchange="fetchPDFs()">
+        <button class="btn" onclick="fetchPDFs()">Authenticate & Load</button>
+    </div>
+
+    <div class="upload-section">
+        <h3 style="margin-top: 0; color: #fff;">Upload New Document</h3>
+        <p style="color: #8b949e; font-size: 0.9rem; margin-bottom: 1.5rem;">Select a PDF to parse via LlamaCloud and index into Qdrant</p>
+        <input type="file" id="fileInput" accept=".pdf,.md" onchange="handleFileSelect(this)">
+        
+        <div>
+            <button class="btn" style="background: transparent; border: 1px solid var(--admin-border);" onclick="document.getElementById('fileInput').click()">Browse Files</button>
+            <button class="btn btn-success" id="uploadBtn" style="margin-left: 1rem;" onclick="uploadPDF()">
+                <div class="spinner" id="uploadSpinner"></div>
+                Upload Selected
+            </button>
+        </div>
+        <div id="selectedFileName" style="margin-top: 1rem; font-size: 0.9rem; color: var(--admin-accent);"></div>
+        <div id="uploadStatus" style="margin-top: 0.5rem; font-size: 0.9rem;"></div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Source Name</th>
+                <th>Original File</th>
+                <th style="width: 100px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="pdfTableBody">
+            <tr>
+                <td colspan="3" style="text-align: center; color: #8b949e;">Enter your API key and click Authenticate to load documents</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    const API_URL = window.location.origin;
+    
+    function handleFileSelect(input) {
+        const nameDisplay = document.getElementById('selectedFileName');
+        if (input.files && input.files.length > 0) {
+            nameDisplay.textContent = `Selected: ${input.files[0].name}`;
+        } else {
+            nameDisplay.textContent = '';
+        }
+    }
+
+    async function fetchPDFs() {
+        const key = document.getElementById('apiKey').value;
+        if (!key) return;
+        
+        const tbody = document.getElementById('pdfTableBody');
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align: center;">Loading...</td></tr>';
+
+        try {
+            const res = await fetch(`${API_URL}/admin/pdfs`);
+            const data = await res.json();
+            tbody.innerHTML = '';
+            
+            const pdfs = Object.entries(data.pdfs || {});
+            
+            if (pdfs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #8b949e;">No documents found in registry</td></tr>';
+                return;
+            }
+
+            for (const [sourceName, details] of pdfs) {
+                const tr = document.createElement('tr');
+                
+                tr.innerHTML = `
+                    <td style="color: #fff; font-weight: 500;">${sourceName}</td>
+                    <td><a href="${details.cloudinary_url}" target="_blank" style="color: var(--admin-accent); text-decoration: none;">${details.filename}</a></td>
+                    <td>
+                        <button class="btn btn-danger" onclick="deletePDF('${sourceName}')">Delete</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }
+        } catch (e) {
+            console.error('Failed to load PDFs:', e);
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--admin-danger);">Failed to load documents</td></tr>';
+        }
+    }
+
+    async function uploadPDF() {
+        const key = document.getElementById('apiKey').value;
+        if (!key) {
+            alert('Please enter your Admin API Key first');
+            return;
+        }
+
+        const fileInput = document.getElementById('fileInput');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            alert('Please select a file to upload');
+            return;
+        }
+
+        const status = document.getElementById('uploadStatus');
+        const btn = document.getElementById('uploadBtn');
+        const spinner = document.getElementById('uploadSpinner');
+        
+        status.textContent = 'Uploading and parsing via LlamaCloud... this may take up to a minute.';
+        status.style.color = '#c9d1d9';
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        try {
+            const res = await fetch(`${API_URL}/admin/upload`, {
+                method: 'POST',
+                headers: {
+                    'X-Admin-Key': key
+                },
+                body: formData
+            });
+
+            const data = await res.json();
+            
+            if (res.ok) {
+                status.textContent = `Upload successful! Ingested ${data.chunks_ingested} chunks.`;
+                status.style.color = 'var(--admin-success)';
+                fileInput.value = '';
+                document.getElementById('selectedFileName').textContent = '';
+                fetchPDFs(); // Reload list
+            } else {
+                status.textContent = 'Error: ' + data.detail;
+                status.style.color = 'var(--admin-danger)';
+            }
+        } catch (e) {
+            status.textContent = 'Error uploading file. Check console for details.';
+            status.style.color = 'var(--admin-danger)';
+            console.error(e);
+        } finally {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+        }
+    }
+
+    async function deletePDF(sourceName) {
+        const key = document.getElementById('apiKey').value;
+        if (!key) {
+            alert('Please enter your Admin API Key first');
+            return;
+        }
+
+        if (!confirm(`Are you absolutely sure you want to permanently delete ${sourceName}?\nThis will remove the chunks from Qdrant, delete the asset from Cloudinary, and remove local cache files.`)) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_URL}/admin/pdfs/${sourceName}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-Admin-Key': key
+                }
+            });
+
+            if (res.ok) {
+                fetchPDFs(); // Refresh list
+            } else {
+                const data = await res.json();
+                alert('Error deleting: ' + data.detail);
+            }
+        } catch (e) {
+            alert('Error deleting file. Check console.');
+            console.error(e);
+        }
+    }
+    
+    // Check if key is cached
+    window.addEventListener('DOMContentLoaded', () => {
+        // Just focus the input
+        document.getElementById('apiKey').focus();
+    });
+</script>
+
+</body>
+</html>
