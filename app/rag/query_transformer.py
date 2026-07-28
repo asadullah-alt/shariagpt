@@ -43,8 +43,14 @@ def generate_hypothetical_document(query: str) -> Optional[str]:
         return None
 
     try:
-        client = OpenAI(api_key=s.openrouter_api_key, base_url=s.openrouter_base_url)
-        completion = client.chat.completions.create(
+        from app.routers.chat import llm_breaker
+        client = OpenAI(
+            api_key=s.openrouter_api_key, 
+            base_url=s.openrouter_base_url,
+            timeout=3.0  # Strict 3-second timeout for HyDE
+        )
+        completion = llm_breaker.call(
+            client.chat.completions.create,
             model=s.openrouter_model,
             messages=[
                 {"role": "user", "content": HYDE_PROMPT.format(query=query)},

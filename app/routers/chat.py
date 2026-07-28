@@ -193,7 +193,11 @@ async def chat_endpoint(
     logger.info(f"[Chat] Prompt building completed in {round((t_prompt - t_retrieve) * 1000, 2)}ms")
 
     # ── 5. LLM via OpenRouter ───────────────────────────────────────────────
-    client = OpenAI(api_key=s.openrouter_api_key, base_url=s.openrouter_base_url)
+    client = OpenAI(
+        api_key=s.openrouter_api_key, 
+        base_url=s.openrouter_base_url,
+        timeout=30.0  # 30-second timeout to prevent Render 502s
+    )
     try:
         completion = llm_breaker.call(
             client.chat.completions.create,
