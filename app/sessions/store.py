@@ -99,9 +99,9 @@ class SessionStore:
                 if is_first_turn and user_id and user_id != "guest":
                     title = user_msg[:40] + "..." if len(user_msg) > 40 else user_msg
                     chat_meta = json.dumps({"title": title, "timestamp": time.time()})
-                    self._r.hset(self._user_chats_key(user_id), mapping={session_id: chat_meta})
-            except Exception:
-                pass
+                    self._r.hset(self._user_chats_key(user_id), values={session_id: chat_meta})
+            except Exception as e:
+                print(f"[SessionStore] Failed to save to redis: {e}")
         else:
             _memory[session_id] = history
             if is_first_turn and user_id and user_id != "guest":
