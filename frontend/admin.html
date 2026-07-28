@@ -198,8 +198,22 @@
     </div>
 
     <div class="auth-section">
-        <input type="password" id="apiKey" class="input-field" placeholder="Enter X-Admin-Key to manage documents" onchange="fetchPDFs()">
-        <button class="btn" onclick="fetchPDFs()">Authenticate & Load</button>
+        <input type="password" id="apiKey" class="input-field" placeholder="Enter X-Admin-Key to manage documents" onchange="fetchPDFs(); fetchEvals();">
+        <button class="btn" onclick="fetchPDFs(); fetchEvals();">Authenticate & Load</button>
+    </div>
+
+    <!-- New Evaluations Section -->
+    <div class="upload-section" style="padding: 2rem; margin-bottom: 2rem; border-color: rgba(88, 166, 255, 0.4);">
+        <h3 style="margin-top: 0; color: #fff;">Ragas Evaluation Metrics</h3>
+        <p style="color: #8b949e; font-size: 0.9rem; margin-bottom: 1.5rem;">Latest automated evaluation scores across the Golden Dataset.</p>
+        
+        <div id="evalMetrics" style="display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 1.5rem;">
+            <div style="color: #8b949e;">Authenticate to load metrics...</div>
+        </div>
+        
+        <div style="text-align: right;">
+            <a href="https://smith.langchain.com/" target="_blank" class="btn btn-success" style="text-decoration: none;">View Traces in LangSmith</a>
+        </div>
     </div>
 
     <div class="upload-section">
@@ -280,6 +294,48 @@
         } catch (e) {
             console.error('Failed to load PDFs:', e);
             tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--admin-danger);">Failed to load documents</td></tr>';
+        }
+    }
+
+    async function fetchEvals() {
+        const key = document.getElementById('apiKey').value;
+        if (!key) return;
+        
+        try {
+            const res = await fetch(`${API_URL}/admin/evals`, {
+                headers: { 'X-Admin-Key': key }
+            });
+            const data = await res.json();
+            const evalContainer = document.getElementById('evalMetrics');
+            
+            if (data.status === 'success' && data.data) {
+                const metrics = data.data;
+                const ts = new Date(metrics.timestamp * 1000).toLocaleString();
+                evalContainer.innerHTML = `
+                    <div style="background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid var(--admin-border); flex: 1; text-align: center;">
+                        <div style="font-size: 2rem; color: var(--admin-accent); font-weight: bold;">${metrics.faithfulness.toFixed(2)}</div>
+                        <div style="font-size: 0.8rem; color: #8b949e; text-transform: uppercase;">Faithfulness</div>
+                    </div>
+                    <div style="background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid var(--admin-border); flex: 1; text-align: center;">
+                        <div style="font-size: 2rem; color: var(--admin-accent); font-weight: bold;">${metrics.answer_relevancy.toFixed(2)}</div>
+                        <div style="font-size: 0.8rem; color: #8b949e; text-transform: uppercase;">Answer Relevancy</div>
+                    </div>
+                    <div style="background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid var(--admin-border); flex: 1; text-align: center;">
+                        <div style="font-size: 2rem; color: var(--admin-accent); font-weight: bold;">${metrics.context_precision.toFixed(2)}</div>
+                        <div style="font-size: 0.8rem; color: #8b949e; text-transform: uppercase;">Context Precision</div>
+                    </div>
+                    <div style="background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid var(--admin-border); flex: 1; text-align: center;">
+                        <div style="font-size: 2rem; color: var(--admin-accent); font-weight: bold;">${metrics.context_recall.toFixed(2)}</div>
+                        <div style="font-size: 0.8rem; color: #8b949e; text-transform: uppercase;">Context Recall</div>
+                    </div>
+                    <div style="width: 100%; text-align: center; color: #8b949e; font-size: 0.8rem; margin-top: 0.5rem; flex-basis: 100%;">Last evaluated: ${ts}</div>
+                `;
+                evalContainer.style.flexWrap = 'wrap';
+            } else {
+                evalContainer.innerHTML = `<div style="color: #8b949e;">${data.message || 'No evaluation data found.'}</div>`;
+            }
+        } catch (e) {
+            console.error('Failed to load evals:', e);
         }
     }
 

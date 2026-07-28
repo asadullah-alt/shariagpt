@@ -1,0 +1,22 @@
+[
+    {
+        "question": "What are the essential conditions for a valid Murabaha transaction?",
+        "ground_truth": "The financier must first own the asset before selling it (selling something not yet owned is prohibited). The original purchase price and profit margin must be clearly disclosed to the buyer. The asset must be tangible and have commercial value."
+    },
+    {
+        "question": "Is it permissible to charge a fixed penalty for late payment in a loan?",
+        "ground_truth": "Charging a fixed penalty for late payment that goes to the bank's profit is considered Riba (usury) and is strictly prohibited. However, a late payment penalty may be charged if it is donated entirely to charity, acting solely as a deterrent."
+    },
+    {
+        "question": "How does a Sukuk differ from a conventional bond?",
+        "ground_truth": "Conventional bonds represent debt and pay fixed interest, which is prohibited (Riba). Sukuk represent an ownership stake in an underlying tangible asset or project, and the returns are generated from the actual profit or rental income of that asset, sharing both risk and reward."
+    },
+    {
+        "question": "Explain the concept of Mudarabah.",
+        "ground_truth": "Mudarabah is a profit-sharing partnership where one party (Rab al-Mal) provides the capital, and the other party (Mudarib) provides the expertise and labor. Profits are shared according to a pre-agreed ratio, but financial losses are borne solely by the capital provider, while the Mudarib loses their time and effort."
+    },
+    {
+        "question": "What is Gharar and why is it prohibited?",
+        "ground_truth": "Gharar refers to excessive uncertainty, ambiguity, or deception in a contract (e.g., selling fish in the sea before catching them). It is prohibited because it leads to disputes and exploitation. Contracts must have clear terms regarding the subject matter, price, and delivery."
+    }
+]

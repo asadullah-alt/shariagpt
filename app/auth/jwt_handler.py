@@ -9,31 +9,40 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.config import get_settings
+from app.security.secrets_manager import SecretsVault, zero_memory
 
 strict_security = HTTPBearer(auto_error=True)
 optional_security = HTTPBearer(auto_error=False)
 
 
-def create_token(email: str, is_2fa_complete: bool = False) -> str:
+def create_token(email: str, is_2fa_complete: bool = False, consent_version: str = "v1.0") -> str:
     """Create a JWT token for the given user."""
     s = get_settings()
     payload = {
         "sub": email,
         "2fa_complete": is_2fa_complete,
+        "consent_version": consent_version,
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(minutes=s.jwt_expire_minutes),
     }
-    return jwt.encode(payload, s.jwt_secret, algorithm="HS256")
+    secret = SecretsVault.get_jwt_secret()
+    token = jwt.encode(payload, secret, algorithm="HS256")
+    zero_memory(secret)
+    return token
 
 
 def decode_token(token: str) -> dict:
     """Decode and validate a JWT token. Raises on failure."""
-    s = get_settings()
+    secret = SecretsVault.get_jwt_secret()
     try:
-        return jwt.decode(token, s.jwt_secret, algorithms=["HS256"])
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
+        zero_memory(secret)
+        return payload
     except jwt.ExpiredSignatureError:
+        zero_memory(secret)
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:
+        zero_memory(secret)
         raise HTTPException(status_code=401, detail="Invalid token")
 
 

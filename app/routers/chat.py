@@ -19,6 +19,8 @@ from app.observability.tracer import TraceRecord, emit_trace
 from app.sessions.store import get_session_store
 from app.auth.jwt_handler import require_auth
 from app.auth.user_store import find_user_by_email
+from app.security.guardrails import check_prompt_injection
+from langsmith import traceable
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
+@traceable(run_type="chain", name="chat_pipeline")
 async def chat_endpoint(
     req: ChatRequest,
     token_payload: dict = Depends(require_auth)
@@ -60,6 +63,10 @@ async def chat_endpoint(
     s = get_settings()
     request_id = str(uuid.uuid4())
     t0 = time.monotonic()
+
+    # ── 0. Prompt Injection Guardrail ───────────────────────────────────────
+    if check_prompt_injection(req.message):
+        raise HTTPException(status_code=400, detail="Security policy violation: Prompt injection detected.")
 
     # ── 1. PII Redaction ────────────────────────────────────────────────────
     redaction = redact(req.message)

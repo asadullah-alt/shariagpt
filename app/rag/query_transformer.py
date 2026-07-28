@@ -19,6 +19,7 @@ Flow:
 from typing import Optional
 from openai import AsyncOpenAI
 from app.config import get_settings
+from langsmith import traceable
 
 HYDE_PROMPT = """You are an Islamic finance expert. Given the question below, 
 write a short, factual paragraph (3-5 sentences) that would appear in an 
@@ -32,6 +33,7 @@ Question: {query}
 Passage:"""
 
 
+@traceable(run_type="llm", name="hyde_generation")
 async def generate_hypothetical_document(query: str) -> Optional[str]:
     """
     Use the LLM to generate a hypothetical passage that answers the query.

@@ -34,6 +34,9 @@ def generate_qr_base64(uri: str) -> str:
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 def verify_totp(secret: str, code: str) -> bool:
-    """Verify a TOTP code against the secret."""
+    """Verify a TOTP code against the secret and zero memory after use."""
+    from app.security.secrets_manager import zero_memory
     totp = pyotp.TOTP(secret)
-    return totp.verify(code)
+    is_valid = totp.verify(code)
+    zero_memory(secret)
+    return is_valid

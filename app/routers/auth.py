@@ -98,7 +98,7 @@ async def login(req: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Issue a token with 2fa_complete = False
-    token = create_token(user["email"], is_2fa_complete=False)
+    token = create_token(user["email"], is_2fa_complete=False, consent_version=user.get("consent_version", "v1.0"))
 
     return LoginResponse(
         token=token,
@@ -128,7 +128,7 @@ async def verify_2fa(req: Verify2FARequest):
         raise HTTPException(status_code=401, detail="Invalid 2FA code")
 
     # Issue full token
-    full_token = create_token(user["email"], is_2fa_complete=True)
+    full_token = create_token(user["email"], is_2fa_complete=True, consent_version=user.get("consent_version", "v1.0"))
 
     return Verify2FAResponse(token=full_token)
 

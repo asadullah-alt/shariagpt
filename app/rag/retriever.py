@@ -16,6 +16,7 @@ from app.rag.embedder import embed_text, sparse_encode_text
 from app.rag.vector_store import hybrid_search
 from app.config import get_settings
 from typing import Optional
+from langsmith import traceable
 
 
 def _merge_rrf(raw_results: list[dict], hyde_results: list[dict], k: int, rrf_k: int = 60) -> list[dict]:
@@ -47,6 +48,7 @@ def _merge_rrf(raw_results: list[dict], hyde_results: list[dict], k: int, rrf_k:
     return results
 
 
+@traceable(run_type="retriever", name="hybrid_retrieval")
 async def retrieve(query: str, k: Optional[int] = None) -> list[dict]:
     """
     Async parallel retrieval pipeline.

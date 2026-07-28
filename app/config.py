@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-shariagpt-jwt-secret-2024"
     jwt_expire_minutes: int = 1440  # 24 hours
 
+    # LangSmith Observability
+    langchain_tracing_v2: str = "false"
+    langchain_api_key: str = ""
+    langchain_project: str = "shariagpt"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

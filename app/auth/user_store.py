@@ -93,6 +93,7 @@ def create_user(
         "balance": balance,
         "totp_secret": totp_secret,
         "is_2fa_enabled": True,
+        "consent_version": "v1.0",
         "created_at": time.time(),
     }
 

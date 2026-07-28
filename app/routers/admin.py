@@ -264,3 +264,16 @@ async def delete_pdf(source_name: str) -> dict:
         return {"message": f"Successfully deleted {source_name}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deletion failed: {e}")
+
+
+@router.get("/evals", dependencies=[Depends(require_admin)])
+async def get_evals() -> dict:
+    """Get the latest Ragas evaluation metrics."""
+    import json
+    eval_path = Path("data/eval_results.json")
+    if not eval_path.exists():
+        return {"status": "no_data", "message": "No evaluations have been run yet."}
+    
+    with open(eval_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {"status": "success", "data": data}
