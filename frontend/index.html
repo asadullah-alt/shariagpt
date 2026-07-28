@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShariaGPT — Islamic Finance AI Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- Landing Page -->
+    <div id="landing-page" class="landing-page">
+        <div class="landing-header">
+            <h2>ShariaGPT</h2>
+            <div class="auth-buttons">
+                <button id="btn-lp-login" class="btn-secondary">Login</button>
+                <button id="btn-lp-register" class="btn-primary">Register</button>
+            </div>
+        </div>
+        <div class="hero-section">
+            <h1>Islamic Finance, Demystified.</h1>
+            <p class="hero-subtitle">Your personal AI assistant for Shariah-compliant financial products, rules, and account guidance.</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🛡️</div>
+                <h3>Riba-Free</h3>
+                <p>Understand the prohibition of interest (Riba) and how Islamic banking ensures fair profit-sharing.</p>
+            </div>
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🤝</div>
+                <h3>Risk Sharing</h3>
+                <p>Explore concepts like Mudarabah and Musharakah, where risk and reward are shared equitably.</p>
+            </div>
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">📜</div>
+                <h3>Asset-Backed</h3>
+                <p>Learn about Sukuk and Murabaha, ensuring all transactions are backed by tangible assets.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application (Hidden until login) -->
+    <div id="app-content" class="app-container hidden">
+        <!-- Sidebar for Admin / Upload / Document List -->
+        <aside class="sidebar glass-panel">
+            <div class="sidebar-header">
+                <h2>ShariaGPT</h2>
+                <p>Islamic Finance AI</p>
+            </div>
+            
+            <div class="sidebar-scrollable">
+                <div class="upload-section">
+
+
+                    <div id="auth-section" class="auth-section">
+                        <h3>Account</h3>
+                        <div id="unauth-controls" class="auth-buttons">
+                            <button id="btn-login-modal" class="btn-secondary btn-sm">Login</button>
+                            <button id="btn-register-modal" class="btn-primary btn-sm">Register</button>
+                        </div>
+                        <div id="auth-controls" class="hidden auth-user-info">
+                            <p id="auth-user-name" class="auth-user-name"></p>
+                            <p id="auth-user-type" class="auth-user-type"></p>
+                            <button id="btn-logout" class="btn-secondary btn-sm">Logout</button>
+                        </div>
+                    </div>
+
+                    <div id="chat-history-section" class="chat-history-section hidden">
+                        <div class="history-header">
+                            <h3>Recent Chats</h3>
+                            <button id="btn-new-chat" class="btn-primary btn-sm" title="New Chat">+</button>
+                        </div>
+                        <div class="chat-history-list" id="chat-history-list">
+                            <div class="no-chats-msg">No recent chats.</div>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-area glass-panel">
+            <div class="chat-header">
+                <div class="chat-title-container">
+                    <h3>Assistant Conversation</h3>
+                </div>
+                <span id="cache-badge" class="badge hidden">Semantic Cache Hit ✨</span>
+            </div>
+            
+            <div class="chat-messages" id="chat-messages">
+                <div class="message assistant">
+                    <div class="avatar">AI</div>
+                    <div class="bubble">As-salamu alaykum! I am ShariaGPT. You can ask me questions about Islamic finance principles, or upload a document to expand my knowledge base. When you get an answer with source citations, click them to view the original PDF page!</div>
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <form id="chat-form">
+                    <input type="text" id="chat-input" placeholder="Ask about Murabaha, Sukuk, Zakat..." autocomplete="off" required>
+                    <button type="submit" class="send-btn" id="send-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        </main>
+
+        <!-- PDF Viewer Panel (Collapsible) -->
+        <section class="pdf-viewer-panel glass-panel closed" id="pdf-viewer-panel">
+            <div class="panel-header">
+                <div class="panel-title">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    <h3 id="pdf-viewer-title">PDF Viewer</h3>
+                </div>
+                <button class="close-panel-btn" id="close-viewer-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="viewer-body">
+                <div class="pdf-placeholder" id="pdf-placeholder">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                    <p>Select a citation or document to view PDF</p>
+                </div>
+                <iframe id="pdf-iframe" class="hidden" src="" frameborder="0"></iframe>
+            </div>
+        </section>
+    </div>
+
+    <!-- Auth Modals -->
+    <div id="auth-modal" class="modal hidden">
+        <div class="modal-content glass-panel">
+            <h2 id="modal-title">Login</h2>
+            <form id="auth-form">
+                <div class="input-group">
+                    <label>Email</label>
+                    <input type="email" id="auth-email" required>
+                </div>
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" id="auth-password" required>
+                </div>
+                
+                <div id="register-fields" class="hidden">
+                    <div class="input-group">
+                        <label>Full Name</label>
+                        <input type="text" id="auth-name">
+                    </div>
+                    <div class="input-group">
+                        <label>Emirates ID</label>
+                        <input type="text" id="auth-emirates-id">
+                    </div>
+                    <div class="input-group">
+                        <label>Account Number</label>
+                        <input type="text" id="auth-account-number">
+                    </div>
+                    <div class="input-group">
+                        <label>Account Type</label>
+                        <select id="auth-account-type" class="custom-select">
+                            <option value="Retail Savings (Mudarabah)">Retail Savings (Mudarabah)</option>
+                            <option value="VIP Wealth Management (Islamic)">VIP Wealth Management (Islamic)</option>
+                            <option value="Current Account (Qard)">Current Account (Qard)</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Balance</label>
+                        <input type="text" id="auth-balance" placeholder="e.g. AED 12,500">
+                    </div>
+                </div>
+                <div id="auth-error" class="error-text hidden"></div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-close-modal" class="btn-secondary">Cancel</button>
+                    <button type="submit" id="btn-submit-auth" class="btn-primary">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2FA Modal -->
+    <div id="twofa-modal" class="modal hidden">
+        <div class="modal-content glass-panel">
+            <h2>Two-Factor Authentication</h2>
+            <div id="qr-container" class="hidden qr-container">
+                <p>Scan this QR code with Google Authenticator or Authy:</p>
+                <img id="qr-image" src="" alt="2FA QR Code">
+            </div>
+            <p>Enter the 6-digit code from your authenticator app:</p>
+            <div class="input-group">
+                <input type="text" id="totp-code" placeholder="000000" maxlength="6" autocomplete="off">
+            </div>
+            <div id="twofa-error" class="error-text hidden"></div>
+            <div class="modal-actions">
+                <button type="button" id="btn-verify-2fa" class="btn-primary" style="width: 100%">Verify Code</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
